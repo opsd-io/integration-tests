@@ -1,0 +1,29 @@
+version: 1
+provider: digitalocean
+
+# Keep this file public: it describes only compatibility combinations and
+# synthetic plan scenarios. Credentials and real infrastructure belong in the
+# private integration workflow.
+cli_refs:
+  - current
+
+iac_tools:
+  - terraform
+  - tofu
+
+modules:
+  digitalocean:
+    refs:
+      - v1.0.0
+
+scenario_generation:
+  base:
+    blueprint: kubernetes-foundation
+    variant: kubernetes
+  capabilities:
+    databases:
+      engines: [postgres, mysql]
+      max_count: 2
+    caches:
+      engines: [redis]
+      max_count: 1
