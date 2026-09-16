@@ -99,6 +99,14 @@ def assert_rendered_components!(manifest_path, rendered)
   end
 end
 
+def remove_placeholder_credentials!(rendered)
+  rendered.glob("**/*.tfvars").each do |tfvars_file|
+    content = tfvars_file.read
+    sanitized = content.lines.reject { |line| line.include?("set-via-TF_VAR_digitalocean_token") }.join
+    tfvars_file.write(sanitized) unless sanitized == content
+  end
+end
+
 run_with_input!(child_env, opsd_command(opsd, "config", "profile", "create", "ci"), "digitalocean\n\nfra1\n")
 run!(child_env, opsd_command(opsd, "config", "profile", "use", "ci"))
 run!(child_env, opsd_command(opsd, "init", "blueprint", scenario.fetch("blueprint"), manifest_path.to_s, "--variant", scenario.fetch("variant")))
@@ -139,6 +147,7 @@ stages.each_with_index do |stage, index|
   active_rendered = rendered if execution_mode == "apply"
   run!(child_env, opsd_command(opsd, "validate", "manifest", manifest_path.to_s))
   run!(child_env, opsd_command(opsd, "render", "manifest", manifest_path.to_s, "--output", rendered.to_s))
+  remove_placeholder_credentials!(rendered) if execution_mode == "apply"
   assert_rendered_components!(manifest_path, rendered)
   run!(child_env, [iac_tool, "init", "-backend=false", "-input=false"], chdir: rendered, retries: 3, retry_delay: 5)
   # The rendered directory is a generated artifact. Normalize it first, then
