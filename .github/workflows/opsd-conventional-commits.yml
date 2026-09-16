@@ -1,0 +1,14 @@
+name: Conventional Commits
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    uses: opsd-io/public-workflows/.github/workflows/conventional-commits.yml@main
+    with:
+      allowed-scopes: "tests,ci,docs,release"
