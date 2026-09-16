@@ -134,7 +134,6 @@ def assert_removed_components!(rendered, removed_modules:)
     abort "Rendered configuration still contains removed module [#{removed_module}]"
   end
 end
-
 run_with_input!(child_env, opsd_command(opsd, "config", "profile", "create", "ci"), "digitalocean\n\nfra1\n")
 run!(child_env, opsd_command(opsd, "config", "profile", "use", "ci"))
 run!(child_env, opsd_command(opsd, "init", "blueprint", scenario.fetch("blueprint"), manifest_path.to_s, "--variant", scenario.fetch("variant")))
