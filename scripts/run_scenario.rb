@@ -144,6 +144,24 @@ def configure_local_backend!(rendered, state_path)
     }
   HCL
 end
+
+def destroy_with_retries!(environment, iac_tool, chdir:, retries: 12, retry_delay: 15)
+  command = [iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false"]
+  puts "$ #{command_text(command)}"
+
+  retries.times do |attempt|
+    return true if system(environment, *command, chdir: chdir.to_s)
+
+    next if attempt == retries - 1
+
+    warn "Destroy failed; retrying in #{retry_delay}s (attempt #{attempt + 2}/#{retries})"
+    sleep retry_delay
+  end
+
+  warn "Destroy failed after #{retries} attempts: #{command_text(command)}"
+  false
+end
+
 run_with_input!(child_env, opsd_command(opsd, "config", "profile", "create", "ci"), "digitalocean\n\nfra1\n")
 run!(child_env, opsd_command(opsd, "config", "profile", "use", "ci"))
 run!(child_env, opsd_command(opsd, "init", "blueprint", scenario.fetch("blueprint"), manifest_path.to_s, "--variant", scenario.fetch("variant")))
@@ -168,7 +186,7 @@ at_exit do
   next unless execution_mode == "apply" && !cleanup_done && active_rendered&.directory?
 
   warn "Cleaning up the active integration environment"
-  system(child_env, iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false", chdir: active_rendered.to_s)
+  destroy_with_retries!(child_env, iac_tool, chdir: active_rendered)
 end
 
 stages.each_with_index do |stage, index|
@@ -218,7 +236,7 @@ end
 
 if execution_mode == "apply"
   final_rendered = run_root.join("rendered-#{stages.length - 1}")
-  run!(child_env, [iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false"], chdir: final_rendered)
+  abort "Unable to clean up the integration environment" unless destroy_with_retries!(child_env, iac_tool, chdir: final_rendered)
   cleanup_done = true
 end
 
