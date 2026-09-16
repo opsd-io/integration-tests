@@ -19,7 +19,8 @@ removes a component again, verifies the final plan, and destroys the
 environment. Each IaC tool gets its own state file and executes the complete
 lifecycle independently. Resource names are namespaced by the workflow run and
 IaC tool, so parallel Terraform and OpenTofu jobs cannot collide in
-DigitalOcean.
+DigitalOcean. The lifecycle uses an explicit local backend per IaC tool, so
+the state path is shared between stages without deprecated CLI flags.
 
 The lifecycle is declared in `ci/public-compatibility.yaml`. Its steps contain
 OPSd commands and a `covers` list. The required module list is checked both for

@@ -134,6 +134,16 @@ def assert_removed_components!(rendered, removed_modules:)
     abort "Rendered configuration still contains removed module [#{removed_module}]"
   end
 end
+
+def configure_local_backend!(rendered, state_path)
+  rendered.join("backend.tf").write(<<~HCL)
+    terraform {
+      backend "local" {
+        path = #{state_path.to_s.dump}
+      }
+    }
+  HCL
+end
 run_with_input!(child_env, opsd_command(opsd, "config", "profile", "create", "ci"), "digitalocean\n\nfra1\n")
 run!(child_env, opsd_command(opsd, "config", "profile", "use", "ci"))
 run!(child_env, opsd_command(opsd, "init", "blueprint", scenario.fetch("blueprint"), manifest_path.to_s, "--variant", scenario.fetch("variant")))
@@ -158,7 +168,7 @@ at_exit do
   next unless execution_mode == "apply" && !cleanup_done && active_rendered&.directory?
 
   warn "Cleaning up the active integration environment"
-  system(child_env, iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false", "-state=#{state_path}", chdir: active_rendered.to_s)
+  system(child_env, iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false", chdir: active_rendered.to_s)
 end
 
 stages.each_with_index do |stage, index|
@@ -190,25 +200,25 @@ stages.each_with_index do |stage, index|
     base_modules: scenario.fetch("base_modules", [])
   )
   assert_removed_components!(rendered, removed_modules: stage.fetch("covers", [])) if operation&.first&.first == "remove"
-  run!(child_env, [iac_tool, "init", "-backend=false", "-input=false"], chdir: rendered, retries: 3, retry_delay: 5)
+  configure_local_backend!(rendered, state_path)
+  run!(child_env, [iac_tool, "init", "-input=false"], chdir: rendered, retries: 3, retry_delay: 5)
   # The rendered directory is a generated artifact. Normalize it first, then
   # keep the check below as a guard against non-deterministic formatting.
   run!(child_env, [iac_tool, "fmt", "-recursive"], chdir: rendered)
   run!(child_env, [iac_tool, "fmt", "-check", "-recursive"], chdir: rendered)
   run!(child_env, [iac_tool, "validate"], chdir: rendered)
-  state_args = ["-state=#{state_path}"]
-  plan_args = [iac_tool, "plan", "-refresh=false", "-input=false", "-lock=false", *state_args]
+  plan_args = [iac_tool, "plan", "-refresh=false", "-input=false", "-lock=false"]
   plan_args << "-var=digitalocean_token=public-plan-placeholder" if execution_mode == "plan"
   run!(child_env, plan_args, chdir: rendered)
   if execution_mode == "apply"
-    run!(child_env, [iac_tool, "apply", "-auto-approve", "-input=false", "-lock=false", *state_args], chdir: rendered)
+    run!(child_env, [iac_tool, "apply", "-auto-approve", "-input=false", "-lock=false"], chdir: rendered)
   end
   puts "Completed public scenario stage: #{stage.fetch('label')}"
 end
 
 if execution_mode == "apply"
   final_rendered = run_root.join("rendered-#{stages.length - 1}")
-  run!(child_env, [iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false", "-state=#{state_path}"], chdir: final_rendered)
+  run!(child_env, [iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false"], chdir: final_rendered)
   cleanup_done = true
 end
 
