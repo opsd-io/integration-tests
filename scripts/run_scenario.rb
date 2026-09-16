@@ -109,13 +109,24 @@ def remove_placeholder_credentials!(rendered)
   end
 end
 
-def namespace_manifest!(manifest_path, iac_tool)
+def namespace_manifest!(manifest_path, iac_tool, cli_ref, modules_ref)
   manifest = YAML.load_file(manifest_path)
   metadata = manifest.fetch("metadata")
   base_name = metadata.fetch("name")
   run_id = ENV.fetch("GITHUB_RUN_ID", Process.pid.to_s)
   attempt = ENV.fetch("GITHUB_RUN_ATTEMPT", "1")
-  suffix = "#{iac_tool}-#{run_id}-#{attempt}".downcase.gsub(/[^a-z0-9-]/, "-")
+  ref_label = lambda do |ref|
+    label = ref.to_s.downcase.gsub(/[^a-z0-9-]/, "-")
+    label = label.gsub(/-+/, "-").sub(/\A-/, "").sub(/-\z/, "")
+    label.empty? ? "ref" : label[0, 24].sub(/-\z/, "")
+  end
+  suffix = [
+    iac_tool,
+    "cli-#{ref_label.call(cli_ref)}",
+    "modules-#{ref_label.call(modules_ref)}",
+    run_id,
+    attempt
+  ].join("-")
   metadata["name"] = "#{base_name}-#{suffix}"
   File.write(manifest_path, YAML.dump(manifest))
 end
@@ -165,7 +176,7 @@ end
 run_with_input!(child_env, opsd_command(opsd, "config", "profile", "create", "ci"), "digitalocean\n\nfra1\n")
 run!(child_env, opsd_command(opsd, "config", "profile", "use", "ci"))
 run!(child_env, opsd_command(opsd, "init", "blueprint", scenario.fetch("blueprint"), manifest_path.to_s, "--variant", scenario.fetch("variant")))
-namespace_manifest!(manifest_path, iac_tool)
+namespace_manifest!(manifest_path, iac_tool, ENV.fetch("OPSD_CLI_REF", "current"), modules_ref)
 
 operations = scenario.fetch("operations", [])
 stages = [{ "label" => "foundation", "operation" => nil }]
