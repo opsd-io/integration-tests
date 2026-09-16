@@ -1,5 +1,9 @@
 # Contributing
 
+Follow the [central OPSd contribution guide](https://github.com/opsd-io/.github/blob/main/CONTRIBUTING.md)
+for organization-wide rules. The scenario-specific guidance below applies in
+this repository.
+
 ## Pull Requests And Commits
 
 Use the following format for the pull request title and every commit:
