@@ -13,5 +13,18 @@ Workflow repositories provide the execution environment. This repository keeps
 the scenario definitions and test logic so public and credentialed runs do not
 drift apart.
 
+The DigitalOcean integration suite uses one lifecycle scenario. It creates the
+Kubernetes foundation, applies incremental changes for supported components,
+removes a component again, verifies the final plan, and destroys the
+environment. Each IaC tool gets its own state file and executes the complete
+lifecycle independently. Resource names are namespaced by the workflow run and
+IaC tool, so parallel Terraform and OpenTofu jobs cannot collide in
+DigitalOcean.
+
+The lifecycle is declared in `ci/public-compatibility.yaml`. Its steps contain
+OPSd commands and a `covers` list. The required module list is checked both for
+declared step coverage and against the rendered Terraform configuration, so
+adding a module without adding real integration coverage fails CI.
+
 Scenario runs should pin the CLI, provider module, and this repository to
 explicit refs when reproducibility matters.

@@ -74,24 +74,26 @@ def opsd_command(opsd, *arguments)
   [opsd, *arguments]
 end
 
-def assert_rendered_components!(manifest_path, rendered)
+def assert_rendered_components!(manifest_path, rendered, required_modules:, base_modules:)
   manifest = YAML.load_file(manifest_path)
   spec = manifest.fetch("spec", {})
-  required_modules = %w[vpc kubernetes project]
-
-  Array(spec["caches"]).each do |cache|
-    required_modules << cache.fetch("engine") if cache.is_a?(Hash)
-  end
-
-  Array(spec["databases"]).each do |database|
-    required_modules << database.fetch("engine") if database.is_a?(Hash)
-  end
-
   module_source = rendered.join("main.tf").read
-  required_modules.uniq.each do |module_name|
+  module_names = {
+    "managed-mysql" => "mysql",
+    "managed-postgres" => "postgres",
+    "managed-redis" => "redis"
+  }
+  required_modules.uniq.each do |required_module|
+    module_name = module_names.fetch(required_module, required_module)
     next if module_source.match?(/module\s+"#{Regexp.escape(module_name)}"\s*\{/)
 
-    abort "Rendered configuration is missing module [#{module_name}] for #{manifest_path}"
+    # A module is required for the lifecycle only after its corresponding step
+    # has been applied. Earlier stages intentionally do not contain it.
+    next unless Array(spec["databases"]).any? { |entry| entry.is_a?(Hash) && entry.fetch("engine", "") == required_module.delete_prefix("managed-") } ||
+                Array(spec["caches"]).any? { |entry| entry.is_a?(Hash) && entry.fetch("engine", "") == required_module.delete_prefix("managed-") } ||
+                base_modules.include?(required_module)
+
+    abort "Rendered configuration is missing required module [#{required_module}] for #{manifest_path}"
   end
 
   if Array(spec["caches"]).empty? && module_source.match?(/module\s+"redis"\s*\{/)
@@ -99,35 +101,77 @@ def assert_rendered_components!(manifest_path, rendered)
   end
 end
 
+def remove_placeholder_credentials!(rendered)
+  rendered.glob("**/*.tfvars").each do |tfvars_file|
+    content = tfvars_file.read
+    sanitized = content.lines.reject { |line| line.include?("set-via-TF_VAR_digitalocean_token") }.join
+    tfvars_file.write(sanitized) unless sanitized == content
+  end
+end
+
+def namespace_manifest!(manifest_path, iac_tool)
+  manifest = YAML.load_file(manifest_path)
+  metadata = manifest.fetch("metadata")
+  base_name = metadata.fetch("name")
+  run_id = ENV.fetch("GITHUB_RUN_ID", Process.pid.to_s)
+  attempt = ENV.fetch("GITHUB_RUN_ATTEMPT", "1")
+  suffix = "#{iac_tool}-#{run_id}-#{attempt}".downcase.gsub(/[^a-z0-9-]/, "-")
+  metadata["name"] = "#{base_name}-#{suffix}"
+  File.write(manifest_path, YAML.dump(manifest))
+end
+
+def assert_removed_components!(rendered, removed_modules:)
+  module_source = rendered.join("main.tf").read
+  module_names = {
+    "managed-mysql" => "mysql",
+    "managed-postgres" => "postgres",
+    "managed-redis" => "redis"
+  }
+  removed_modules.each do |removed_module|
+    module_name = module_names.fetch(removed_module, removed_module)
+    next unless module_source.match?(/module\s+"#{Regexp.escape(module_name)}(?:_\d+)?"\s*\{/)
+
+    abort "Rendered configuration still contains removed module [#{removed_module}]"
+  end
+end
+
 run_with_input!(child_env, opsd_command(opsd, "config", "profile", "create", "ci"), "digitalocean\n\nfra1\n")
 run!(child_env, opsd_command(opsd, "config", "profile", "use", "ci"))
 run!(child_env, opsd_command(opsd, "init", "blueprint", scenario.fetch("blueprint"), manifest_path.to_s, "--variant", scenario.fetch("variant")))
+namespace_manifest!(manifest_path, iac_tool)
 
 operations = scenario.fetch("operations", [])
 stages = [{ "label" => "foundation", "operation" => nil }]
 operations.each_with_index do |operation, index|
   command = operation.fetch("command")
   args = operation.fetch("args", [])
-  stages << { "label" => "step-#{index + 1}-#{command.join('-')}", "operation" => [command, args] }
+  stages << {
+    "label" => operation.fetch("id", "step-#{index + 1}-#{command.join('-')}"),
+    "operation" => [command, args],
+    "covers" => Array(operation["covers"])
+  }
 end
 
 active_rendered = nil
 cleanup_done = false
+state_path = run_root.join("#{iac_tool}.tfstate")
 at_exit do
   next unless execution_mode == "apply" && !cleanup_done && active_rendered&.directory?
 
   warn "Cleaning up the active integration environment"
-  system(child_env, iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false", chdir: active_rendered.to_s)
+  system(child_env, iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false", "-state=#{state_path}", chdir: active_rendered.to_s)
 end
 
 stages.each_with_index do |stage, index|
   operation = stage.fetch("operation")
   unless operation.nil?
     command, args = operation
-    case command
-    in ["add", resource, value]
+    if command.length == 3 && command[0] == "add"
+      resource = command[1]
+      value = command[2]
       run!(child_env, opsd_command(opsd, "add", resource, value, manifest_path.to_s, *args))
-    in ["remove", resource]
+    elsif command.length == 2 && command[0] == "remove"
+      resource = command[1]
       resource_id = args.fetch(0) { abort "Missing resource id for remove #{resource}" }
       run!(child_env, opsd_command(opsd, "remove", resource, manifest_path.to_s, resource_id, *args.drop(1)))
     else
@@ -139,25 +183,33 @@ stages.each_with_index do |stage, index|
   active_rendered = rendered if execution_mode == "apply"
   run!(child_env, opsd_command(opsd, "validate", "manifest", manifest_path.to_s))
   run!(child_env, opsd_command(opsd, "render", "manifest", manifest_path.to_s, "--output", rendered.to_s))
-  assert_rendered_components!(manifest_path, rendered)
+  remove_placeholder_credentials!(rendered) if execution_mode == "apply"
+  assert_rendered_components!(
+    manifest_path,
+    rendered,
+    required_modules: scenario.fetch("required_modules", []),
+    base_modules: scenario.fetch("base_modules", [])
+  )
+  assert_removed_components!(rendered, removed_modules: stage.fetch("covers", [])) if operation&.first&.first == "remove"
   run!(child_env, [iac_tool, "init", "-backend=false", "-input=false"], chdir: rendered, retries: 3, retry_delay: 5)
   # The rendered directory is a generated artifact. Normalize it first, then
   # keep the check below as a guard against non-deterministic formatting.
   run!(child_env, [iac_tool, "fmt", "-recursive"], chdir: rendered)
   run!(child_env, [iac_tool, "fmt", "-check", "-recursive"], chdir: rendered)
   run!(child_env, [iac_tool, "validate"], chdir: rendered)
-  plan_args = [iac_tool, "plan", "-refresh=false", "-input=false", "-lock=false"]
+  state_args = ["-state=#{state_path}"]
+  plan_args = [iac_tool, "plan", "-refresh=false", "-input=false", "-lock=false", *state_args]
   plan_args << "-var=digitalocean_token=public-plan-placeholder" if execution_mode == "plan"
   run!(child_env, plan_args, chdir: rendered)
   if execution_mode == "apply"
-    run!(child_env, [iac_tool, "apply", "-auto-approve", "-input=false", "-lock=false"], chdir: rendered)
+    run!(child_env, [iac_tool, "apply", "-auto-approve", "-input=false", "-lock=false", *state_args], chdir: rendered)
   end
   puts "Completed public scenario stage: #{stage.fetch('label')}"
 end
 
 if execution_mode == "apply"
   final_rendered = run_root.join("rendered-#{stages.length - 1}")
-  run!(child_env, [iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false"], chdir: final_rendered)
+  run!(child_env, [iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false", "-state=#{state_path}"], chdir: final_rendered)
   cleanup_done = true
 end
 

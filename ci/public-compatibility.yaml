@@ -20,10 +20,31 @@ scenario_generation:
   base:
     blueprint: kubernetes-foundation
     variant: kubernetes
-  capabilities:
-    databases:
-      engines: [postgres, mysql]
-      max_count: 2
-    caches:
-      engines: [redis]
-      max_count: 1
+  lifecycle:
+    id: digitalocean-kubernetes-lifecycle
+    base_modules: [vpc, project, kubernetes]
+    # These are the modules currently emitted by the Kubernetes renderer.
+    required_modules:
+      - vpc
+      - project
+      - kubernetes
+      - managed-mysql
+      - managed-postgres
+      - managed-redis
+    steps:
+      - id: add-mysql
+        command: [add, database, mysql]
+        args: [--id, database-mysql]
+        covers: [managed-mysql]
+      - id: add-postgres
+        command: [add, database, postgres]
+        args: [--id, database-postgres]
+        covers: [managed-postgres]
+      - id: add-redis
+        command: [add, cache, redis]
+        args: [--id, cache-redis]
+        covers: [managed-redis]
+      - id: remove-mysql
+        command: [remove, database]
+        args: [database-mysql]
+        covers: [managed-mysql]
