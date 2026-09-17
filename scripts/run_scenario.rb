@@ -221,6 +221,14 @@ end
 operations = scenario.fetch("operations", [])
 kubernetes_upgradeable = version_resolution && version_resolution.fetch("kubernetes").fetch("previous")
 stages = [{ "label" => "foundation", "operation" => nil, "version_target" => kubernetes_upgradeable ? "previous" : "latest" }]
+if kubernetes_upgradeable
+  stages << {
+    "label" => "upgrade-kubernetes",
+    "operation" => nil,
+    "version_target" => "latest",
+    "version_engines" => []
+  }
+end
 operations.each_with_index do |operation, index|
   command = operation.fetch("command")
   args = operation.fetch("args", [])
