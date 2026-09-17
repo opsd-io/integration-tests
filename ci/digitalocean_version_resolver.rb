@@ -34,8 +34,13 @@ module OPSd
 
     def database_versions(engine)
       payload = get("/databases/options")
-      engine_key = { "postgres" => "pg" }.fetch(engine.to_s, engine.to_s)
-      normalize_versions(payload.dig("options", engine_key))
+      options = payload.fetch("options", {})
+      engine_name = engine.to_s
+      keys = [engine_name, { "postgres" => "pg", "pg" => "postgres" }.fetch(engine_name, engine_name)].uniq
+      versions = keys.lazy.map { |key| normalize_versions(options[key]) }.find { |values| !values.empty? } || []
+      return versions unless versions.empty?
+
+      raise "DigitalOcean returned no versions for #{engine_name}; available option keys: #{options.keys.sort.join(", ")}"
     end
 
     private
@@ -54,6 +59,10 @@ module OPSd
     end
 
     def normalize_versions(values)
+      if values.is_a?(Hash) && values.key?("versions")
+        return normalize_versions(values.fetch("versions"))
+      end
+
       Array(values).each_with_object([]) do |value, result|
         slug = value.is_a?(Hash) ? (value["slug"] || value["version"] || value["kubernetes_version"]) : value
         result << slug.to_s unless slug.to_s.empty?
