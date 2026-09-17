@@ -27,7 +27,7 @@ class DigitalOceanVersionResolverTest < Minitest::Test
       when "/v2/kubernetes/options"
         { options: { versions: [{ slug: "1.36.3-do.5" }, { slug: "1.37.1-do.0" }] } }
       when "/v2/databases/options"
-        { options: { engines: [{ slug: "mysql", versions: [{ slug: "8.0" }, { slug: "8.4" }] }] } }
+        { options: { mysql: [{ version: "8.0" }, { version: "8.4" }] } }
       else
         raise "Unexpected path: #{request.path}"
       end

@@ -34,11 +34,8 @@ module OPSd
 
     def database_versions(engine)
       payload = get("/databases/options")
-      engines = Array(payload.dig("options", "engines"))
-      entry = engines.find do |candidate|
-        candidate["slug"].to_s == engine.to_s || candidate["name"].to_s.downcase == engine.to_s.downcase
-      end
-      normalize_versions(entry ? entry["versions"] : [])
+      engine_key = { "postgres" => "pg" }.fetch(engine.to_s, engine.to_s)
+      normalize_versions(payload.dig("options", engine_key))
     end
 
     private
