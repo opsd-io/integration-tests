@@ -36,3 +36,7 @@ workflow and is never written to that file.
 
 Scenario runs should pin the CLI, provider module, and this repository to
 explicit refs when reproducibility matters.
+
+See the [central OPSd contribution guide](https://github.com/opsd-io/.github/blob/main/CONTRIBUTING.md)
+for scenario conventions, local checks, and the public-plan/private-apply test
+flow.
