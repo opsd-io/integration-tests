@@ -8,15 +8,15 @@ require_relative "../ci/public_scenario_matrix"
 
 config = YAML.load_file(ENV.fetch("COMPATIBILITY_FILE", "ci/public-compatibility.yaml"))
 provider = config.fetch("provider")
-module_refs = if ENV.key?("OPSD_MODULES_REF")
-  [ENV.fetch("OPSD_MODULES_REF")]
-else
+module_refs = if ENV["OPSD_MODULES_REF"].to_s.strip.empty?
   config.fetch("modules").fetch(provider).fetch("refs")
-end
-cli_refs = if ENV.key?("OPSD_CLI_REF")
-  [ENV.fetch("OPSD_CLI_REF")]
 else
+  [ENV.fetch("OPSD_MODULES_REF")]
+end
+cli_refs = if ENV["OPSD_CLI_REF"].to_s.strip.empty?
   config.fetch("cli_refs", ["current"])
+else
+  [ENV.fetch("OPSD_CLI_REF")]
 end.map do |ref|
   ref == "current" ? ENV.fetch("GITHUB_SHA") : ref
 end

@@ -20,7 +20,8 @@ module OPSd
         base.merge(
           "operations" => steps.map { |step| step.slice("id", "command", "args", "covers") },
           "required_modules" => lifecycle.fetch("required_modules", []),
-          "base_modules" => base_modules
+          "base_modules" => base_modules,
+          "metadata" => lifecycle.fetch("metadata", {})
         )
       )].map { |entry| entry.merge("provider" => provider) }
     end
@@ -32,7 +33,8 @@ module OPSd
         "variant" => base.fetch("variant"),
         "operations" => base.fetch("operations", []),
         "required_modules" => base.fetch("required_modules", []),
-        "base_modules" => base.fetch("base_modules", [])
+        "base_modules" => base.fetch("base_modules", []),
+        "metadata" => base.fetch("metadata", {})
       }
     end
     private_class_method :scenario

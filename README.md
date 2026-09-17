@@ -27,5 +27,12 @@ OPSd commands and a `covers` list. The required module list is checked both for
 declared step coverage and against the rendered Terraform configuration, so
 adding a module without adding real integration coverage fails CI.
 
+Apply-mode scenarios may declare `metadata.version_upgrade`. The runner then
+resolves provider versions from the provider API, creates resources with the
+previous available version, and adds upgrade stages targeting the latest
+available version. The resolved pair is written to the temporary
+`version-resolution.yaml` file for diagnostics. The token is supplied by the
+workflow and is never written to that file.
+
 Scenario runs should pin the CLI, provider module, and this repository to
 explicit refs when reproducibility matters.

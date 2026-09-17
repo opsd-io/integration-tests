@@ -11,6 +11,7 @@ require "tmpdir"
 require "yaml"
 
 require_relative "../ci/public_scenario_matrix"
+require_relative "../ci/digitalocean_version_resolver"
 
 TEST_ROOT = Pathname(__dir__).join("..").realpath
 CLI_ROOT = Pathname(ENV.fetch("OPSD_CLI_ROOT")).realpath
@@ -109,14 +110,46 @@ def remove_placeholder_credentials!(rendered)
   end
 end
 
-def namespace_manifest!(manifest_path, iac_tool)
+def namespace_manifest!(manifest_path, iac_tool, cli_ref, modules_ref)
   manifest = YAML.load_file(manifest_path)
   metadata = manifest.fetch("metadata")
   base_name = metadata.fetch("name")
   run_id = ENV.fetch("GITHUB_RUN_ID", Process.pid.to_s)
   attempt = ENV.fetch("GITHUB_RUN_ATTEMPT", "1")
-  suffix = "#{iac_tool}-#{run_id}-#{attempt}".downcase.gsub(/[^a-z0-9-]/, "-")
+  ref_label = lambda do |ref|
+    label = ref.to_s.downcase.gsub(/[^a-z0-9-]/, "-")
+    label = label.gsub(/-+/, "-").sub(/\A-/, "").sub(/-\z/, "")
+    label.empty? ? "ref" : label[0, 24].sub(/-\z/, "")
+  end
+  suffix = [
+    iac_tool,
+    "cli-#{ref_label.call(cli_ref)}",
+    "modules-#{ref_label.call(modules_ref)}",
+    run_id,
+    attempt
+  ].join("-")
   metadata["name"] = "#{base_name}-#{suffix}"
+  File.write(manifest_path, YAML.dump(manifest))
+end
+
+def set_version_target!(manifest_path, target, resolution)
+  return if target.nil? || resolution.nil?
+
+  manifest = YAML.load_file(manifest_path)
+  kubernetes_version = resolution.fetch("kubernetes").fetch(target)
+  compute_groups = Array(manifest.dig("spec", "compute_groups"))
+  compute_groups.each do |group|
+    config = group["config"]
+    config["kubernetes_version"] = kubernetes_version if config.is_a?(Hash) && config.key?("kubernetes_version")
+  end
+
+  databases = resolution.fetch("databases")
+  Array(manifest.dig("spec", "databases")).each do |database|
+    engine = database["engine"].to_s
+    next unless databases.key?(engine)
+
+    database["version"] = databases.fetch(engine).fetch(target)
+  end
   File.write(manifest_path, YAML.dump(manifest))
 end
 
@@ -165,18 +198,45 @@ end
 run_with_input!(child_env, opsd_command(opsd, "config", "profile", "create", "ci"), "digitalocean\n\nfra1\n")
 run!(child_env, opsd_command(opsd, "config", "profile", "use", "ci"))
 run!(child_env, opsd_command(opsd, "init", "blueprint", scenario.fetch("blueprint"), manifest_path.to_s, "--variant", scenario.fetch("variant")))
-namespace_manifest!(manifest_path, iac_tool)
+namespace_manifest!(manifest_path, iac_tool, ENV.fetch("OPSD_CLI_REF", "current"), modules_ref)
+
+upgrade_metadata = scenario.dig("metadata", "version_upgrade") || {}
+version_resolution = nil
+if execution_mode == "apply" && upgrade_metadata.any?
+  manifest = YAML.load_file(manifest_path)
+  engines = Array(upgrade_metadata["databases"])
+  resolver = OPSd::DigitalOceanVersionResolver.new(
+    token: ENV.fetch("DIGITALOCEAN_TOKEN", ENV.fetch("TF_VAR_digitalocean_token"))
+  )
+  version_resolution = resolver.resolve(region: manifest.dig("metadata", "region"), engines: engines)
+  File.write(run_root.join("version-resolution.yaml"), YAML.dump(version_resolution))
+  kubernetes_versions = version_resolution.fetch("kubernetes")
+  kubernetes_summary = kubernetes_versions["previous"] ?
+    "#{kubernetes_versions["previous"]} -> #{kubernetes_versions["latest"]}" : kubernetes_versions["latest"]
+  puts "Resolved provider versions: Kubernetes #{kubernetes_summary}" \
+       + (engines.empty? ? "" : ", databases #{engines.join(", ")}")
+end
 
 operations = scenario.fetch("operations", [])
-stages = [{ "label" => "foundation", "operation" => nil }]
+kubernetes_upgradeable = version_resolution && version_resolution.fetch("kubernetes").fetch("previous")
+stages = [{ "label" => "foundation", "operation" => nil, "version_target" => kubernetes_upgradeable ? "previous" : "latest" }]
 operations.each_with_index do |operation, index|
   command = operation.fetch("command")
   args = operation.fetch("args", [])
   stages << {
     "label" => operation.fetch("id", "step-#{index + 1}-#{command.join('-')}"),
     "operation" => [command, args],
-    "covers" => Array(operation["covers"])
+    "covers" => Array(operation["covers"]),
+    "version_target" => if version_resolution && command.length == 3 && command[0] == "add" && command[1] == "database" &&
+                           Array(upgrade_metadata["databases"]).include?(command[2])
+                         version_resolution.fetch("databases").fetch(command[2], {}).fetch("previous", nil) ? "previous" : "latest"
+                       end
   }
+  if version_resolution && command.length == 3 && command[0] == "add" && command[1] == "database" &&
+     Array(upgrade_metadata["databases"]).include?(command[2]) &&
+     version_resolution.fetch("databases").fetch(command[2], {}).fetch("previous", nil)
+    stages << { "label" => "upgrade-#{command[2]}", "operation" => nil, "version_target" => "latest" }
+  end
 end
 
 active_rendered = nil
@@ -205,6 +265,8 @@ stages.each_with_index do |stage, index|
       abort "Unsupported public scenario operation: #{command.inspect}"
     end
   end
+
+  set_version_target!(manifest_path, stage["version_target"], version_resolution)
 
   rendered = run_root.join("rendered-#{index}")
   active_rendered = rendered if execution_mode == "apply"

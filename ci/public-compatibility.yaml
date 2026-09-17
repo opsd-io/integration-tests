@@ -22,6 +22,10 @@ scenario_generation:
     variant: kubernetes
   lifecycle:
     id: digitalocean-kubernetes-lifecycle
+    metadata:
+      version_upgrade:
+        kubernetes: true
+        databases: [mysql, postgres, redis]
     base_modules: [vpc, project, kubernetes]
     # These are the modules currently emitted by the Kubernetes renderer.
     required_modules:
