@@ -27,7 +27,7 @@ class DigitalOceanVersionResolverTest < Minitest::Test
       when "/v2/kubernetes/options"
         { options: { versions: [{ slug: "1.36.3-do.5" }, { slug: "1.37.1-do.0" }] } }
       when "/v2/databases/options"
-        { options: { mysql: [{ version: "8.0" }, { version: "8.4" }] } }
+        { options: { mysql: { versions: [{ version: "8.0" }, { version: "8.4" }] } } }
       else
         raise "Unexpected path: #{request.path}"
       end
@@ -47,5 +47,12 @@ class DigitalOceanVersionResolverTest < Minitest::Test
     assert_equal "8.0", result.fetch("databases").fetch("mysql").fetch("previous")
     assert_equal "8.4", result.fetch("databases").fetch("mysql").fetch("latest")
     assert_equal ["/v2/kubernetes/options", "/v2/databases/options"], http.paths
+  end
+
+  def test_resolves_postgres_from_the_provider_pg_key
+    http = FakeHttp.new
+    result = OPSd::DigitalOceanVersionResolver.new(token: "secret", http_client: http).send(:normalize_versions, [{ "version" => "16" }])
+
+    assert_equal ["16"], result
   end
 end
