@@ -15,6 +15,9 @@ class ResourceNameTest < Minitest::Test
 
     assert_operator first.length, :<=, OPSd::ResourceName::MAX_LENGTH
     assert_operator second.length, :<=, OPSd::ResourceName::MAX_LENGTH
+    %w[-database-postgres -database-mysql -valkey].each do |suffix|
+      assert_operator "#{first}#{suffix}".length, :<=, 63
+    end
     refute_equal first, second
     assert_match(/\A[a-z0-9-]+\z/, first)
   end

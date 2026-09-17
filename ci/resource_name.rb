@@ -4,7 +4,10 @@ require "digest"
 
 module OPSd
   module ResourceName
-    MAX_LENGTH = 63
+    # The CLI appends resource-specific suffixes (up to 18 characters) to the
+    # manifest name, so leave room for those suffixes within DigitalOcean's
+    # 63-character resource-name limit.
+    MAX_LENGTH = 45
 
     module_function
 
