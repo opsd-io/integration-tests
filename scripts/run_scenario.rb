@@ -13,6 +13,7 @@ require "yaml"
 require_relative "../ci/public_scenario_matrix"
 require_relative "../ci/digitalocean_version_resolver"
 require_relative "../ci/resource_name"
+require_relative "../ci/version_target"
 
 TEST_ROOT = Pathname(__dir__).join("..").realpath
 CLI_ROOT = Pathname(ENV.fetch("OPSD_CLI_ROOT")).realpath
@@ -133,27 +134,6 @@ def namespace_manifest!(manifest_path, iac_tool, cli_ref, modules_ref)
   File.write(manifest_path, YAML.dump(manifest))
 end
 
-def set_version_target!(manifest_path, target, resolution)
-  return if target.nil? || resolution.nil?
-
-  manifest = YAML.load_file(manifest_path)
-  kubernetes_version = resolution.fetch("kubernetes").fetch(target)
-  compute_groups = Array(manifest.dig("spec", "compute_groups"))
-  compute_groups.each do |group|
-    config = group["config"]
-    config["kubernetes_version"] = kubernetes_version if config.is_a?(Hash) && config.key?("kubernetes_version")
-  end
-
-  databases = resolution.fetch("databases")
-  Array(manifest.dig("spec", "databases")).each do |database|
-    engine = database["engine"].to_s
-    next unless databases.key?(engine)
-
-    database["version"] = databases.fetch(engine).fetch(target)
-  end
-  File.write(manifest_path, YAML.dump(manifest))
-end
-
 def assert_removed_components!(rendered, removed_modules:)
   module_source = rendered.join("main.tf").read
   module_names = {
@@ -239,12 +219,20 @@ operations.each_with_index do |operation, index|
     "version_target" => if version_resolution && command.length == 3 && command[0] == "add" && command[1] == "database" &&
                            Array(upgrade_metadata["databases"]).include?(command[2])
                          version_resolution.fetch("databases").fetch(command[2], {}).fetch("previous", nil) ? "previous" : "latest"
-                       end
+                       end,
+    "version_engines" => if command.length == 3 && command[0] == "add" && command[1] == "database"
+                           [command[2]]
+                         end
   }
   if version_resolution && command.length == 3 && command[0] == "add" && command[1] == "database" &&
      Array(upgrade_metadata["databases"]).include?(command[2]) &&
      version_resolution.fetch("databases").fetch(command[2], {}).fetch("previous", nil)
-    stages << { "label" => "upgrade-#{command[2]}", "operation" => nil, "version_target" => "latest" }
+    stages << {
+      "label" => "upgrade-#{command[2]}",
+      "operation" => nil,
+      "version_target" => "latest",
+      "version_engines" => [command[2]]
+    }
   end
 end
 
@@ -275,7 +263,7 @@ stages.each_with_index do |stage, index|
     end
   end
 
-  set_version_target!(manifest_path, stage["version_target"], version_resolution)
+  OPSd::VersionTarget.apply!(manifest_path, stage["version_target"], version_resolution, engines: stage["version_engines"])
 
   rendered = run_root.join("rendered-#{index}")
   active_rendered = rendered if execution_mode == "apply"
