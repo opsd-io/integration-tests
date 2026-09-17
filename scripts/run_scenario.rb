@@ -132,7 +132,7 @@ def namespace_manifest!(manifest_path, iac_tool, cli_ref, modules_ref)
   File.write(manifest_path, YAML.dump(manifest))
 end
 
-def set_version_target!(manifest_path, target, resolution)
+def set_version_target!(manifest_path, target, resolution, database_engines: nil)
   return if target.nil? || resolution.nil?
 
   manifest = YAML.load_file(manifest_path)
@@ -147,6 +147,7 @@ def set_version_target!(manifest_path, target, resolution)
   Array(manifest.dig("spec", "databases")).each do |database|
     engine = database["engine"].to_s
     next unless databases.key?(engine)
+    next if database_engines && !database_engines.include?(engine)
 
     database["version"] = databases.fetch(engine).fetch(target)
   end
@@ -229,13 +230,21 @@ operations.each_with_index do |operation, index|
     "covers" => Array(operation["covers"]),
     "version_target" => if version_resolution && command.length == 3 && command[0] == "add" && command[1] == "database" &&
                            Array(upgrade_metadata["databases"]).include?(command[2])
-                         version_resolution.fetch("databases").fetch(command[2], {}).fetch("previous", nil) ? "previous" : "latest"
-                       end
+                       version_resolution.fetch("databases").fetch(command[2], {}).fetch("previous", nil) ? "previous" : "latest"
+                       end,
+    "version_engines" => if command.length == 3 && command[0] == "add" && command[1] == "database"
+                            [command[2]]
+                          end
   }
   if version_resolution && command.length == 3 && command[0] == "add" && command[1] == "database" &&
      Array(upgrade_metadata["databases"]).include?(command[2]) &&
      version_resolution.fetch("databases").fetch(command[2], {}).fetch("previous", nil)
-    stages << { "label" => "upgrade-#{command[2]}", "operation" => nil, "version_target" => "latest" }
+    stages << {
+      "label" => "upgrade-#{command[2]}",
+      "operation" => nil,
+      "version_target" => "latest",
+      "version_engines" => [command[2]]
+    }
   end
 end
 
@@ -266,7 +275,12 @@ stages.each_with_index do |stage, index|
     end
   end
 
-  set_version_target!(manifest_path, stage["version_target"], version_resolution)
+  set_version_target!(
+    manifest_path,
+    stage["version_target"],
+    version_resolution,
+    database_engines: stage["version_engines"]
+  )
 
   rendered = run_root.join("rendered-#{index}")
   active_rendered = rendered if execution_mode == "apply"
