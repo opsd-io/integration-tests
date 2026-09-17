@@ -12,6 +12,7 @@ require "yaml"
 
 require_relative "../ci/public_scenario_matrix"
 require_relative "../ci/digitalocean_version_resolver"
+require_relative "../ci/resource_name"
 
 TEST_ROOT = Pathname(__dir__).join("..").realpath
 CLI_ROOT = Pathname(ENV.fetch("OPSD_CLI_ROOT")).realpath
@@ -121,14 +122,14 @@ def namespace_manifest!(manifest_path, iac_tool, cli_ref, modules_ref)
     label = label.gsub(/-+/, "-").sub(/\A-/, "").sub(/-\z/, "")
     label.empty? ? "ref" : label[0, 24].sub(/-\z/, "")
   end
-  suffix = [
+  labels = [
     iac_tool,
     "cli-#{ref_label.call(cli_ref)}",
     "modules-#{ref_label.call(modules_ref)}",
     run_id,
     attempt
-  ].join("-")
-  metadata["name"] = "#{base_name}-#{suffix}"
+  ]
+  metadata["name"] = OPSd::ResourceName.bounded(base_name, labels)
   File.write(manifest_path, YAML.dump(manifest))
 end
 
