@@ -14,7 +14,7 @@ iac_tools:
 modules:
   digitalocean:
     refs:
-      - v1.0.0
+      - main
 
 scenario_generation:
   base:
@@ -25,7 +25,7 @@ scenario_generation:
     metadata:
       version_upgrade:
         kubernetes: true
-        databases: [mysql, postgres, redis]
+        databases: [mysql, postgres, valkey]
     base_modules: [vpc, project, kubernetes]
     # These are the modules currently emitted by the Kubernetes renderer.
     required_modules:
@@ -34,7 +34,7 @@ scenario_generation:
       - kubernetes
       - managed-mysql
       - managed-postgres
-      - managed-redis
+      - managed-valkey
     steps:
       - id: add-mysql
         command: [add, database, mysql]
@@ -44,10 +44,10 @@ scenario_generation:
         command: [add, database, postgres]
         args: [--id, database-postgres]
         covers: [managed-postgres]
-      - id: add-redis
-        command: [add, cache, redis]
-        args: [--id, cache-redis]
-        covers: [managed-redis]
+      - id: add-valkey
+        command: [add, cache, valkey]
+        args: [--id, cache-valkey]
+        covers: [managed-valkey]
       - id: remove-mysql
         command: [remove, database]
         args: [database-mysql]

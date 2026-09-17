@@ -82,7 +82,7 @@ def assert_rendered_components!(manifest_path, rendered, required_modules:, base
   module_names = {
     "managed-mysql" => "mysql",
     "managed-postgres" => "postgres",
-    "managed-redis" => "redis"
+    "managed-valkey" => "valkey"
   }
   required_modules.uniq.each do |required_module|
     module_name = module_names.fetch(required_module, required_module)
@@ -97,8 +97,8 @@ def assert_rendered_components!(manifest_path, rendered, required_modules:, base
     abort "Rendered configuration is missing required module [#{required_module}] for #{manifest_path}"
   end
 
-  if Array(spec["caches"]).empty? && module_source.match?(/module\s+"redis"\s*\{/)
-    abort "Rendered configuration still contains Redis after it was removed"
+  if Array(spec["caches"]).empty? && module_source.match?(/module\s+"valkey"\s*\{/)
+    abort "Rendered configuration still contains Valkey after it was removed"
   end
 end
 
@@ -158,7 +158,7 @@ def assert_removed_components!(rendered, removed_modules:)
   module_names = {
     "managed-mysql" => "mysql",
     "managed-postgres" => "postgres",
-    "managed-redis" => "redis"
+    "managed-valkey" => "valkey"
   }
   removed_modules.each do |removed_module|
     module_name = module_names.fetch(removed_module, removed_module)
