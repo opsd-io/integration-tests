@@ -6,6 +6,17 @@ require "yaml"
 
 require_relative "../ci/public_scenario_matrix"
 
+def immutable_ref(repository, ref)
+  return ref if repository.to_s.empty? || ref.match?(/\A[0-9a-f]{40}\z/i)
+
+  candidates = ["refs/heads/#{ref}", "refs/tags/#{ref}"]
+  result = `git ls-remote https://github.com/#{repository}.git #{candidates.join(" ")}`
+  sha = result.lines.map { |line| line.split.first }.compact.first
+  abort "Could not resolve #{repository}@#{ref} to an immutable commit" if sha.to_s.empty?
+
+  sha
+end
+
 config = YAML.load_file(ENV.fetch("COMPATIBILITY_FILE", "ci/public-compatibility.yaml"))
 provider = config.fetch("provider")
 module_refs = if ENV["OPSD_MODULES_REF"].to_s.strip.empty?
@@ -13,12 +24,13 @@ module_refs = if ENV["OPSD_MODULES_REF"].to_s.strip.empty?
 else
   [ENV.fetch("OPSD_MODULES_REF")]
 end
+module_refs = module_refs.map { |ref| immutable_ref(ENV.fetch("OPSD_MODULES_REPOSITORY", ""), ref) }
 cli_refs = if ENV["OPSD_CLI_REF"].to_s.strip.empty?
   config.fetch("cli_refs", ["current"])
 else
   [ENV.fetch("OPSD_CLI_REF")]
 end.map do |ref|
-  ref == "current" ? ENV.fetch("GITHUB_SHA") : ref
+  ref == "current" ? ENV.fetch("GITHUB_SHA") : immutable_ref(ENV.fetch("OPSD_CLI_REPOSITORY", ""), ref)
 end
 tools = config.fetch("iac_tools", %w[terraform tofu])
 scenarios = OPSd::PublicScenarioMatrix.expand(config)
