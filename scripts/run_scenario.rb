@@ -11,6 +11,7 @@ require "tmpdir"
 require "yaml"
 
 require_relative "../ci/public_scenario_matrix"
+require_relative "../ci/command_runner"
 require_relative "../ci/digitalocean_version_resolver"
 require_relative "../ci/resource_name"
 require_relative "../ci/version_target"
@@ -47,20 +48,13 @@ def command_text(command)
   Shellwords.join(command)
 end
 
-def run!(environment, command, chdir: CLI_ROOT, retries: 1, retry_delay: 0)
+COMMAND_RUNNER = OPSd::CommandRunner.new
+
+def run!(environment, command, chdir: CLI_ROOT, retries: 1, retry_delay: 0, retry_on: nil)
   puts "$ #{command_text(command)}"
-  attempts = 0
-  loop do
-    return if system(environment, *command, chdir: chdir.to_s)
-
-    attempts += 1
-    break if attempts >= retries
-
-    warn "Command failed; retrying in #{retry_delay}s (attempt #{attempts + 1}/#{retries})"
-    sleep retry_delay
-  end
-
-  abort "Command failed with status #{$?.exitstatus || 1}: #{command_text(command)}"
+  COMMAND_RUNNER.run!(environment, command, chdir: chdir, retries: retries, retry_delay: retry_delay, retry_on: retry_on)
+rescue RuntimeError => e
+  abort e.message
 end
 
 def run_with_input!(environment, command, input, chdir: CLI_ROOT)
@@ -162,17 +156,10 @@ end
 def destroy_with_retries!(environment, iac_tool, chdir:, retries: 12, retry_delay: 15)
   command = [iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false"]
   puts "$ #{command_text(command)}"
-
-  retries.times do |attempt|
-    return true if system(environment, *command, chdir: chdir.to_s)
-
-    next if attempt == retries - 1
-
-    warn "Destroy failed; retrying in #{retry_delay}s (attempt #{attempt + 2}/#{retries})"
-    sleep retry_delay
-  end
-
-  warn "Destroy failed after #{retries} attempts: #{command_text(command)}"
+  COMMAND_RUNNER.run!(environment, command, chdir: chdir, retries: retries, retry_delay: retry_delay)
+  true
+rescue RuntimeError => e
+  warn e.message
   false
 end
 
@@ -288,7 +275,14 @@ stages.each_with_index do |stage, index|
   plan_args << "-var=digitalocean_token=public-plan-placeholder" if execution_mode == "plan"
   run!(child_env, plan_args, chdir: rendered)
   if execution_mode == "apply"
-    run!(child_env, [iac_tool, "apply", "-auto-approve", "-input=false", "-lock=false"], chdir: rendered)
+    run!(
+      child_env,
+      [iac_tool, "apply", "-auto-approve", "-input=false", "-lock=false"],
+      chdir: rendered,
+      retries: 3,
+      retry_delay: 30,
+      retry_on: OPSd::CommandRunner::TRANSIENT_API_ERROR
+    )
   end
   puts "Completed public scenario stage: #{stage.fetch('label')}"
 end
