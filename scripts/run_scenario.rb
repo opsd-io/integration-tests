@@ -156,7 +156,14 @@ end
 def destroy_with_retries!(environment, iac_tool, chdir:, retries: 12, retry_delay: 15)
   command = [iac_tool, "destroy", "-auto-approve", "-input=false", "-lock=false"]
   puts "$ #{command_text(command)}"
-  COMMAND_RUNNER.run!(environment, command, chdir: chdir, retries: retries, retry_delay: retry_delay)
+  COMMAND_RUNNER.run!(
+    environment,
+    command,
+    chdir: chdir,
+    retries: retries,
+    retry_delay: retry_delay,
+    retry_on: OPSd::CommandRunner::TRANSIENT_API_ERROR
+  )
   true
 rescue RuntimeError => e
   warn e.message
