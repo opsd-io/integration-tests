@@ -7,7 +7,30 @@ require_relative "../ci/command_runner"
 class CommandRunnerTest < Minitest::Test
   FakeStatus = Struct.new(:success?, :exitstatus)
 
-  def test_retries_only_matching_transient_failures
+  def test_does_not_retry_database_conflicts
+    attempts = 0
+    sleeps = []
+    runner = OPSd::CommandRunner.new(
+      sleeper: ->(seconds) { sleeps << seconds },
+      executor: lambda do |_environment, _command, _chdir|
+        attempts += 1
+        OPSd::CommandRunner::Result.new(
+          status: FakeStatus.new(false, 1),
+          output: "422 database name is not available"
+        )
+      end
+    )
+
+    error = assert_raises(RuntimeError) do
+      runner.run!({}, ["tofu", "apply"], chdir: ".", retries: 3, retry_delay: 30, retry_on: OPSd::CommandRunner::TRANSIENT_API_ERROR)
+    end
+
+    assert_includes error.message, "after 1 attempt"
+    assert_equal 1, attempts
+    assert_empty sleeps
+  end
+
+  def test_retries_transient_cleanup_conflicts
     attempts = 0
     sleeps = []
     runner = OPSd::CommandRunner.new(
@@ -17,7 +40,7 @@ class CommandRunnerTest < Minitest::Test
         if attempts == 1
           OPSd::CommandRunner::Result.new(
             status: FakeStatus.new(false, 1),
-            output: "422 database name is not available"
+            output: "Can not delete VPC with active Subnets"
           )
         else
           OPSd::CommandRunner::Result.new(status: FakeStatus.new(true, 0), output: "")
@@ -25,11 +48,11 @@ class CommandRunnerTest < Minitest::Test
       end
     )
 
-    result = runner.run!({}, ["tofu", "apply"], chdir: ".", retries: 3, retry_delay: 30, retry_on: OPSd::CommandRunner::TRANSIENT_API_ERROR)
+    result = runner.run!({}, ["tofu", "destroy"], chdir: ".", retries: 3, retry_delay: 15, retry_on: OPSd::CommandRunner::TRANSIENT_API_ERROR)
 
     assert result.status.success?
     assert_equal 2, attempts
-    assert_equal [30], sleeps
+    assert_equal [15], sleeps
   end
 
   def test_does_not_retry_non_transient_failures

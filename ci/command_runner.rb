@@ -10,7 +10,7 @@ module OPSd
     TRANSIENT_API_ERROR = /
       (?:\b429\b|\b500\b|\b502\b|\b503\b|\b504\b)|
       rate\s+limit|too\s+many\s+requests|temporarily\s+unavailable|
-      eventual\s+consistency|already\s+exists|not\s+available|
+      eventual\s+consistency|
       active\s+(?:members|subnets)|could\s+not\s+find\s+(?:cluster|resource)
     /ix
 
