@@ -128,6 +128,24 @@ def namespace_manifest!(manifest_path, iac_tool, cli_ref, modules_ref)
   File.write(manifest_path, YAML.dump(manifest))
 end
 
+def apply_manifest_overrides!(manifest_path, overrides)
+  return if overrides.empty?
+
+  manifest = YAML.load_file(manifest_path)
+  spec = manifest.fetch("spec")
+  overrides.fetch("kubernetes_config", {}).each do |key, value|
+    spec.fetch("compute_groups").first.fetch("config")[key] = value
+  end
+  overrides.fetch("components", {}).each do |layer, components|
+    target = spec.fetch("layers").fetch(layer).fetch("components")
+    components.each do |component, settings|
+      target[component] ||= {}
+      target[component].merge!(settings)
+    end
+  end
+  File.write(manifest_path, YAML.dump(manifest))
+end
+
 def assert_removed_components!(rendered, removed_modules:)
   module_source = rendered.join("main.tf").read
   module_names = {
@@ -174,6 +192,7 @@ run_with_input!(child_env, opsd_command(opsd, "config", "profile", "create", "ci
 run!(child_env, opsd_command(opsd, "config", "profile", "use", "ci"))
 run!(child_env, opsd_command(opsd, "init", "blueprint", scenario.fetch("blueprint"), manifest_path.to_s, "--variant", scenario.fetch("variant")))
 namespace_manifest!(manifest_path, iac_tool, ENV.fetch("OPSD_CLI_REF", "current"), modules_ref)
+apply_manifest_overrides!(manifest_path, scenario.fetch("manifest_overrides", {}))
 
 upgrade_metadata = scenario.dig("metadata", "version_upgrade") || {}
 version_resolution = nil
