@@ -21,7 +21,8 @@ module OPSd
           "operations" => steps.map { |step| step.slice("id", "command", "args", "covers") },
           "required_modules" => lifecycle.fetch("required_modules", []),
           "base_modules" => base_modules,
-          "metadata" => lifecycle.fetch("metadata", {})
+          "metadata" => lifecycle.fetch("metadata", {}),
+          "manifest_overrides" => lifecycle.fetch("manifest_overrides", {})
         )
       )].map { |entry| entry.merge("provider" => provider) }
     end
@@ -34,7 +35,8 @@ module OPSd
         "operations" => base.fetch("operations", []),
         "required_modules" => base.fetch("required_modules", []),
         "base_modules" => base.fetch("base_modules", []),
-        "metadata" => base.fetch("metadata", {})
+        "metadata" => base.fetch("metadata", {}),
+        "manifest_overrides" => base.fetch("manifest_overrides", {})
       }
     end
     private_class_method :scenario
