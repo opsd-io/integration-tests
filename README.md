@@ -32,6 +32,11 @@ They verify generated Gateway profiles, cert-manager resources, the DigitalOcean
 DNS-01 solver, and the TLS Secret reference without requiring a live cluster or
 publishing DNS credentials.
 
+The ExternalDNS render-only scenario checks the pinned chart, Gateway API route
+and Service sources, domain filters, TXT ownership policy, and Secret-backed
+DigitalOcean webhook configuration. It does not contact DigitalOcean or verify
+a live DNS record.
+
 Apply-mode scenarios may declare `metadata.version_upgrade`. The runner then
 resolves provider versions from the provider API, creates resources with the
 previous available version, and adds upgrade stages targeting the latest

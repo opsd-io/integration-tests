@@ -85,3 +85,12 @@ scenario_generation:
           server: staging
         execution_modes: [plan]
         iac_tools: [render-only]
+    external_dns_scenario:
+      id: digitalocean-external-dns
+      values:
+        domain_filters: [example.test]
+        txt_owner_id: opsd-ci
+        token_secret_name: digitalocean-dns
+        policy: upsert-only
+      execution_modes: [plan]
+      iac_tools: [render-only]

@@ -73,7 +73,36 @@ module OPSd
         )
       end
 
-      ([lifecycle_scenario] + gateway_scenarios).map { |entry| entry.merge("provider" => provider) }
+      external_dns_scenario = lifecycle["external_dns_scenario"]
+      generated_scenarios = ([lifecycle_scenario] + gateway_scenarios)
+      if external_dns_scenario
+        values = external_dns_scenario.fetch("values")
+        overrides = deep_merge(
+          lifecycle.fetch("manifest_overrides", {}),
+          {
+            "components" => {
+              "infrastructure" => {
+                "external-dns" => { "enabled" => true, "values" => values }
+              }
+            }
+          }
+        )
+        generated_scenarios << scenario(
+          external_dns_scenario.fetch("id"),
+          base.merge(
+            "operations" => [],
+            "required_modules" => base_modules,
+            "base_modules" => base_modules,
+            "metadata" => {},
+            "manifest_overrides" => overrides,
+            "expected_external_dns" => values,
+            "execution_modes" => external_dns_scenario.fetch("execution_modes", ["plan"]),
+            "iac_tools" => external_dns_scenario.fetch("iac_tools", ["render-only"])
+          )
+        )
+      end
+
+      generated_scenarios.map { |entry| entry.merge("provider" => provider) }
     end
 
     def deep_merge(left, right)
@@ -94,6 +123,7 @@ module OPSd
         "manifest_overrides" => base.fetch("manifest_overrides", {}),
         "expected_gateway_profiles" => base.fetch("expected_gateway_profiles", []),
         "expected_gateway_tls" => base.fetch("expected_gateway_tls", {}),
+        "expected_external_dns" => base.fetch("expected_external_dns", {}),
         "execution_modes" => base.fetch("execution_modes", ["plan", "apply"]),
         "iac_tools" => base["iac_tools"]
       }

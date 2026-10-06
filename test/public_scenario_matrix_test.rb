@@ -104,4 +104,32 @@ class PublicScenarioMatrixTest < Minitest::Test
     assert_equal "staging", scenario.dig("manifest_overrides", "components", "infrastructure", "gateway-api", "values", "acme", "server")
     assert_equal "gateway.example.test", scenario.dig("manifest_overrides", "components", "infrastructure", "gateway-api", "values", "public", "hostname")
   end
+
+  def test_expands_external_dns_render_only_scenario
+    config = {
+      "provider" => "digitalocean",
+      "scenario_generation" => {
+        "base" => { "blueprint" => "kubernetes-foundation", "variant" => "kubernetes" },
+        "lifecycle" => {
+          "id" => "lifecycle",
+          "base_modules" => [],
+          "required_modules" => [],
+          "steps" => [],
+          "external_dns_scenario" => {
+            "id" => "external-dns",
+            "values" => {
+              "domain_filters" => ["example.test"],
+              "txt_owner_id" => "opsd-test"
+            }
+          }
+        }
+      }
+    }
+
+    scenario = OPSd::PublicScenarioMatrix.expand(config).find { |entry| entry.fetch("id") == "external-dns" }
+
+    assert_equal ["example.test"], scenario.dig("expected_external_dns", "domain_filters")
+    assert_equal true, scenario.dig("manifest_overrides", "components", "infrastructure", "external-dns", "enabled")
+    assert_equal ["render-only"], scenario.fetch("iac_tools")
+  end
 end
