@@ -32,6 +32,11 @@ scenario_generation:
         infrastructure:
           gateway-api:
             enabled: true
+            values:
+              public:
+                enabled: false
+              private:
+                enabled: false
     metadata:
       version_upgrade:
         kubernetes: true
@@ -62,3 +67,12 @@ scenario_generation:
         command: [remove, database]
         args: [database-mysql]
         covers: [managed-mysql]
+    gateway_scenarios:
+      - id: digitalocean-gateway-public
+        enabled_profiles: [public]
+        execution_modes: [plan]
+        iac_tools: [render-only]
+      - id: digitalocean-gateway-private
+        enabled_profiles: [private]
+        execution_modes: [plan]
+        iac_tools: [render-only]

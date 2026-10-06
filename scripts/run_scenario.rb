@@ -25,8 +25,9 @@ execution_mode = ENV.fetch("OPSD_EXECUTION_MODE", "plan")
 compatibility_file = Pathname(ENV.fetch("OPSD_PUBLIC_COMPATIBILITY_FILE", "ci/public-compatibility.yaml"))
 compatibility_file = TEST_ROOT.join(compatibility_file) unless compatibility_file.absolute?
 
-abort "Unsupported IaC tool: #{iac_tool}" unless %w[terraform tofu].include?(iac_tool)
+abort "Unsupported IaC tool: #{iac_tool}" unless %w[terraform tofu render-only].include?(iac_tool)
 abort "Unsupported execution mode: #{execution_mode}" unless %w[plan apply].include?(execution_mode)
+abort "render-only scenarios cannot run in apply mode" if iac_tool == "render-only" && execution_mode == "apply"
 
 config = YAML.load_file(compatibility_file)
 scenario = OPSd::PublicScenarioMatrix.expand(config).find { |entry| entry.fetch("id") == scenario_id }
@@ -161,6 +162,32 @@ def assert_removed_components!(rendered, removed_modules:)
   end
 end
 
+def assert_gateway_profiles!(manifest_path, rendered, expected_profiles:)
+  manifest = YAML.load_file(manifest_path)
+  component = manifest.dig("spec", "layers", "infrastructure", "components", "gateway-api") || {}
+  values = component.fetch("values", {})
+  enabled_profiles = %w[public private].select { |profile| values.dig(profile, "enabled") == true }
+  unless enabled_profiles.sort == expected_profiles.sort
+    abort "Manifest Gateway profiles #{enabled_profiles.inspect} do not match scenario expectation #{expected_profiles.inspect}"
+  end
+
+  gateway_dir = rendered.join("layers", "10-infrastructure", "gateways")
+  rendered_profiles = gateway_dir.directory? ? gateway_dir.glob("*.yaml").map { |path| path.basename(".yaml").to_s }.sort : []
+  unless rendered_profiles == expected_profiles.sort
+    abort "Rendered Gateway profiles #{rendered_profiles.inspect} do not match scenario expectation #{expected_profiles.inspect}"
+  end
+
+  expected_profiles.each do |profile|
+    gateway = YAML.load_file(gateway_dir.join("#{profile}.yaml"))
+    abort "#{profile} profile did not render a Gateway" unless gateway["kind"] == "Gateway"
+    abort "#{profile} Gateway does not use the DOKS-managed Cilium class" unless gateway.dig("spec", "gatewayClassName") == "cilium"
+    next unless profile == "private"
+
+    network = gateway.dig("spec", "infrastructure", "annotations", "service.beta.kubernetes.io/do-loadbalancer-network")
+    abort "Private Gateway is missing the internal load balancer setting" unless network == "INTERNAL"
+  end
+end
+
 def configure_local_backend!(rendered, state_path)
   rendered.join("backend.tf").write(<<~HCL)
     terraform {
@@ -289,7 +316,12 @@ stages.each_with_index do |stage, index|
     required_modules: scenario.fetch("required_modules", []),
     base_modules: scenario.fetch("base_modules", [])
   )
+  assert_gateway_profiles!(manifest_path, rendered, expected_profiles: scenario.fetch("expected_gateway_profiles", []))
   assert_removed_components!(rendered, removed_modules: stage.fetch("covers", [])) if operation&.first&.first == "remove"
+  if iac_tool == "render-only"
+    puts "Completed render-only scenario stage: #{stage.fetch('label')}"
+    next
+  end
   configure_local_backend!(rendered, state_path)
   run!(child_env, [iac_tool, "init", "-input=false"], chdir: rendered, retries: 3, retry_delay: 5)
   # The rendered directory is a generated artifact. Normalize it first, then
