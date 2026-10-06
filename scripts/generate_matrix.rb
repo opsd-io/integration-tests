@@ -33,12 +33,15 @@ end.map do |ref|
   ref == "current" ? ENV.fetch("GITHUB_SHA") : immutable_ref(ENV.fetch("OPSD_CLI_REPOSITORY", ""), ref)
 end
 tools = config.fetch("iac_tools", %w[terraform tofu])
-scenarios = OPSd::PublicScenarioMatrix.expand(config)
+execution_mode = ENV.fetch("OPSD_EXECUTION_MODE", "plan")
+scenarios = OPSd::PublicScenarioMatrix.expand(config).select do |scenario|
+  Array(scenario.fetch("execution_modes", %w[plan apply])).include?(execution_mode)
+end
 
 entries = cli_refs.flat_map do |cli_ref|
   module_refs.flat_map do |modules_ref|
     scenarios.flat_map do |scenario|
-      tools.map do |iac_tool|
+      Array(scenario["iac_tools"] || tools).map do |iac_tool|
         {
           "provider" => provider,
           "cli_ref" => cli_ref,
