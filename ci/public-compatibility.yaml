@@ -76,3 +76,12 @@ scenario_generation:
         enabled_profiles: [private]
         execution_modes: [plan]
         iac_tools: [render-only]
+      - id: digitalocean-gateway-tls
+        enabled_profiles: [public]
+        hostnames:
+          public: gateway.example.test
+        acme:
+          email: certs@example.test
+          server: staging
+        execution_modes: [plan]
+        iac_tools: [render-only]

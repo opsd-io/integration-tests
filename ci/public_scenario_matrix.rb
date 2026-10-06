@@ -30,6 +30,16 @@ module OPSd
         enabled_profiles = Array(gateway_scenario.fetch("enabled_profiles"))
         invalid_profiles = enabled_profiles - %w[public private]
         abort "Unsupported Gateway profiles: #{invalid_profiles.join(', ')}" unless invalid_profiles.empty?
+        hostnames = gateway_scenario.fetch("hostnames", {})
+        invalid_hostname_profiles = hostnames.keys - enabled_profiles
+        abort "Hostnames configured for disabled Gateway profiles: #{invalid_hostname_profiles.join(', ')}" unless invalid_hostname_profiles.empty?
+
+        gateway_values = %w[public private].to_h do |profile|
+          values = { "enabled" => enabled_profiles.include?(profile) }
+          values["hostname"] = hostnames.fetch(profile) if hostnames.key?(profile)
+          [profile, values]
+        end
+        gateway_values["acme"] = gateway_scenario.fetch("acme") unless hostnames.empty?
 
         overrides = deep_merge(
           lifecycle.fetch("manifest_overrides", {}),
@@ -38,9 +48,7 @@ module OPSd
               "infrastructure" => {
                 "gateway-api" => {
                   "enabled" => true,
-                  "values" => %w[public private].to_h do |profile|
-                    [profile, { "enabled" => enabled_profiles.include?(profile) }]
-                  end
+                  "values" => gateway_values
                 }
               }
             }
@@ -55,6 +63,10 @@ module OPSd
             "metadata" => {},
             "manifest_overrides" => overrides,
             "expected_gateway_profiles" => enabled_profiles,
+            "expected_gateway_tls" => hostnames.empty? ? {} : {
+              "hostnames" => hostnames,
+              "acme" => gateway_scenario.fetch("acme")
+            },
             "execution_modes" => gateway_scenario.fetch("execution_modes", ["plan"]),
             "iac_tools" => gateway_scenario.fetch("iac_tools", ["render-only"])
           )
@@ -81,6 +93,7 @@ module OPSd
         "metadata" => base.fetch("metadata", {}),
         "manifest_overrides" => base.fetch("manifest_overrides", {}),
         "expected_gateway_profiles" => base.fetch("expected_gateway_profiles", []),
+        "expected_gateway_tls" => base.fetch("expected_gateway_tls", {}),
         "execution_modes" => base.fetch("execution_modes", ["plan", "apply"]),
         "iac_tools" => base["iac_tools"]
       }
