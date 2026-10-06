@@ -219,6 +219,32 @@ def assert_gateway_tls!(rendered, expected_tls:)
   end
 end
 
+def assert_external_dns!(rendered, expected:)
+  return if expected.empty?
+
+  application_path = rendered.join("layers", "10-infrastructure", "external-dns.yaml")
+  abort "ExternalDNS Application did not render" unless application_path.file?
+  application = YAML.load_file(application_path)
+  abort "ExternalDNS chart is not pinned" unless application.dig("spec", "source", "targetRevision") == "1.23.0"
+  values = YAML.safe_load(application.dig("spec", "source", "helm", "values"))
+  abort "ExternalDNS is missing Gateway API route and Service sources" unless values.fetch("sources").sort == %w[gateway-httproute service]
+  abort "ExternalDNS is missing the configured domain filters" unless values.fetch("domainFilters") == expected.fetch("domain_filters")
+  abort "ExternalDNS TXT ownership policy is incorrect" unless values.fetch("registry") == "txt" && values.fetch("txtOwnerId") == expected.fetch("txt_owner_id")
+  abort "ExternalDNS deletion policy is unsafe or unexpected" unless values.fetch("policy") == expected.fetch("policy", "upsert-only")
+  webhook_env = values.dig("provider", "webhook", "env")
+  token = webhook_env.find { |entry| entry["name"] == "DO_TOKEN" }
+  secret_ref = token&.dig("valueFrom", "secretKeyRef")
+  abort "ExternalDNS token is not sourced from a Kubernetes Secret" unless secret_ref == {
+    "name" => expected.fetch("token_secret_name", "digitalocean-dns"),
+    "key" => "access-token"
+  }
+  abort "ExternalDNS domain filter is not applied to the webhook" unless webhook_env.any? do |entry|
+    entry["name"] == "DO_DOMAIN_FILTER" && entry["value"] == expected.fetch("domain_filters").join(",")
+  end
+  abort "ExternalDNS webhook provider is not configured" unless values.dig("provider", "name") == "webhook" &&
+    values.dig("extraArgs", "webhook-provider-url") == "http://localhost:8080"
+end
+
 def configure_local_backend!(rendered, state_path)
   rendered.join("backend.tf").write(<<~HCL)
     terraform {
@@ -349,6 +375,7 @@ stages.each_with_index do |stage, index|
   )
   assert_gateway_profiles!(manifest_path, rendered, expected_profiles: scenario.fetch("expected_gateway_profiles", []))
   assert_gateway_tls!(rendered, expected_tls: scenario.fetch("expected_gateway_tls", {}))
+  assert_external_dns!(rendered, expected: scenario.fetch("expected_external_dns", {}))
   assert_removed_components!(rendered, removed_modules: stage.fetch("covers", [])) if operation&.first&.first == "remove"
   if iac_tool == "render-only"
     puts "Completed render-only scenario stage: #{stage.fetch('label')}"
