@@ -37,6 +37,12 @@ and Service sources, domain filters, TXT ownership policy, and Secret-backed
 DigitalOcean webhook configuration. It does not contact DigitalOcean or verify
 a live DNS record.
 
+The External Secrets render-only scenario checks the pinned operator chart,
+CRD installation, namespace creation, and Argo CD project source permission. It
+does not contact DigitalOcean Secrets Manager or validate a live bootstrap
+token; the webhook endpoint used by the documented spike has no published
+DigitalOcean API contract.
+
 Apply-mode scenarios may declare `metadata.version_upgrade`. The runner then
 resolves provider versions from the provider API, creates resources with the
 previous available version, and adds upgrade stages targeting the latest

@@ -245,6 +245,27 @@ def assert_external_dns!(rendered, expected:)
     values.dig("extraArgs", "webhook-provider-url") == "http://localhost:8080"
 end
 
+def assert_external_secrets!(rendered, expected:)
+  return unless expected
+
+  application_path = rendered.join("layers", "10-infrastructure", "external-secrets.yaml")
+  abort "External Secrets Operator Application did not render" unless application_path.file?
+  application = YAML.load_file(application_path)
+  abort "External Secrets Operator chart source is incorrect" unless application.dig("spec", "source", "repoURL") == "https://charts.external-secrets.io" &&
+    application.dig("spec", "source", "chart") == "external-secrets"
+  abort "External Secrets Operator chart is not pinned" unless application.dig("spec", "source", "targetRevision") == "2.12.0"
+  abort "External Secrets Operator namespace is incorrect" unless application.dig("spec", "destination", "namespace") == "external-secrets"
+  values = YAML.safe_load(application.dig("spec", "source", "helm", "values"))
+  abort "External Secrets Operator CRDs are not enabled" unless values.fetch("installCRDs") == true
+  abort "External Secrets Operator namespace is not created by Argo CD" unless application.dig("spec", "syncPolicy", "syncOptions").include?("CreateNamespace=true")
+  project_path = rendered.join("layers", "00-bootstrap", "argocd", "projects", "infrastructure.yaml")
+  if project_path.file?
+    project = YAML.load_file(project_path)
+    abort "External Secrets chart repository is not allowed by the infrastructure project" unless project.dig("spec", "sourceRepos").include?("https://charts.external-secrets.io")
+  end
+  abort "Rendered operator manifest unexpectedly contains bootstrap credentials" if File.read(application_path).match?(/accessToken|DIGITALOCEAN_ACCESS_TOKEN/)
+end
+
 def configure_local_backend!(rendered, state_path)
   rendered.join("backend.tf").write(<<~HCL)
     terraform {
@@ -376,6 +397,7 @@ stages.each_with_index do |stage, index|
   assert_gateway_profiles!(manifest_path, rendered, expected_profiles: scenario.fetch("expected_gateway_profiles", []))
   assert_gateway_tls!(rendered, expected_tls: scenario.fetch("expected_gateway_tls", {}))
   assert_external_dns!(rendered, expected: scenario.fetch("expected_external_dns", {}))
+  assert_external_secrets!(rendered, expected: scenario.fetch("expected_external_secrets", false))
   assert_removed_components!(rendered, removed_modules: stage.fetch("covers", [])) if operation&.first&.first == "remove"
   if iac_tool == "render-only"
     puts "Completed render-only scenario stage: #{stage.fetch('label')}"

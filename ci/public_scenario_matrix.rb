@@ -102,6 +102,33 @@ module OPSd
         )
       end
 
+      external_secrets_scenario = lifecycle["external_secrets_scenario"]
+      if external_secrets_scenario
+        overrides = deep_merge(
+          lifecycle.fetch("manifest_overrides", {}),
+          {
+            "components" => {
+              "infrastructure" => {
+                "external-secrets" => { "enabled" => true }
+              }
+            }
+          }
+        )
+        generated_scenarios << scenario(
+          external_secrets_scenario.fetch("id"),
+          base.merge(
+            "operations" => [],
+            "required_modules" => base_modules,
+            "base_modules" => base_modules,
+            "metadata" => {},
+            "manifest_overrides" => overrides,
+            "expected_external_secrets" => true,
+            "execution_modes" => external_secrets_scenario.fetch("execution_modes", ["plan"]),
+            "iac_tools" => external_secrets_scenario.fetch("iac_tools", ["render-only"])
+          )
+        )
+      end
+
       generated_scenarios.map { |entry| entry.merge("provider" => provider) }
     end
 
@@ -124,6 +151,7 @@ module OPSd
         "expected_gateway_profiles" => base.fetch("expected_gateway_profiles", []),
         "expected_gateway_tls" => base.fetch("expected_gateway_tls", {}),
         "expected_external_dns" => base.fetch("expected_external_dns", {}),
+        "expected_external_secrets" => base.fetch("expected_external_secrets", false),
         "execution_modes" => base.fetch("execution_modes", ["plan", "apply"]),
         "iac_tools" => base["iac_tools"]
       }
