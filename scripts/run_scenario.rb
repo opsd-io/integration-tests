@@ -188,6 +188,37 @@ def assert_gateway_profiles!(manifest_path, rendered, expected_profiles:)
   end
 end
 
+def assert_gateway_tls!(rendered, expected_tls:)
+  return if expected_tls.empty?
+
+  certificates_dir = rendered.join("layers", "10-infrastructure", "gateways", "certificates")
+  cert_manager = YAML.load_file(certificates_dir.join("cert-manager.yaml"))
+  abort "cert-manager Application did not render" unless cert_manager["kind"] == "Application"
+  abort "cert-manager chart is not pinned" if cert_manager.dig("spec", "source", "targetRevision").to_s.empty?
+
+  issuer = YAML.load_file(certificates_dir.join("cluster-issuer.yaml"))
+  abort "ClusterIssuer did not render" unless issuer["kind"] == "ClusterIssuer"
+  expected_server = expected_tls.dig("acme", "server") == "staging" ?
+    "https://acme-staging-v02.api.letsencrypt.org/directory" :
+    "https://acme-v02.api.letsencrypt.org/directory"
+  abort "ClusterIssuer did not use the expected ACME server" unless issuer.dig("spec", "acme", "server") == expected_server
+  solver = issuer.dig("spec", "acme", "solvers", 0, "dns01", "digitalocean")
+  abort "ClusterIssuer is missing the DigitalOcean DNS-01 solver" unless solver.is_a?(Hash)
+
+  expected_tls.fetch("hostnames").each do |profile, hostname|
+    gateway = YAML.load_file(rendered.join("layers", "10-infrastructure", "gateways", "#{profile}.yaml"))
+    listener = gateway.dig("spec", "listeners").find { |entry| entry["name"] == "https" }
+    abort "#{profile} Gateway HTTPS listener has the wrong hostname" unless listener&.fetch("hostname") == hostname
+    abort "#{profile} Gateway listener does not terminate TLS" unless listener&.dig("tls", "mode") == "Terminate"
+
+    certificate = YAML.load_file(certificates_dir.join("#{profile}.yaml"))
+    abort "#{profile} Certificate does not cover its Gateway hostname" unless certificate.dig("spec", "dnsNames") == [hostname]
+    secret_name = certificate.dig("spec", "secretName")
+    reference = listener.dig("tls", "certificateRefs", 0)
+    abort "#{profile} Gateway does not reference the issued TLS Secret" unless reference&.fetch("name") == secret_name
+  end
+end
+
 def configure_local_backend!(rendered, state_path)
   rendered.join("backend.tf").write(<<~HCL)
     terraform {
@@ -317,6 +348,7 @@ stages.each_with_index do |stage, index|
     base_modules: scenario.fetch("base_modules", [])
   )
   assert_gateway_profiles!(manifest_path, rendered, expected_profiles: scenario.fetch("expected_gateway_profiles", []))
+  assert_gateway_tls!(rendered, expected_tls: scenario.fetch("expected_gateway_tls", {}))
   assert_removed_components!(rendered, removed_modules: stage.fetch("covers", [])) if operation&.first&.first == "remove"
   if iac_tool == "render-only"
     puts "Completed render-only scenario stage: #{stage.fetch('label')}"

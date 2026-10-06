@@ -27,6 +27,11 @@ OPSd commands and a `covers` list. The required module list is checked both for
 declared step coverage and against the rendered Terraform configuration, so
 adding a module without adding real integration coverage fails CI.
 
+Gateway and TLS render-only scenarios also live in the compatibility matrix.
+They verify generated Gateway profiles, cert-manager resources, the DigitalOcean
+DNS-01 solver, and the TLS Secret reference without requiring a live cluster or
+publishing DNS credentials.
+
 Apply-mode scenarios may declare `metadata.version_upgrade`. The runner then
 resolves provider versions from the provider API, creates resources with the
 previous available version, and adds upgrade stages targeting the latest

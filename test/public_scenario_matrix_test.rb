@@ -75,4 +75,33 @@ class PublicScenarioMatrixTest < Minitest::Test
     assert_equal "10.240.0.0/16", scenarios.fetch("private").dig("manifest_overrides", "kubernetes_config", "cluster_subnet")
     refute scenarios.fetch("private").dig("manifest_overrides", "components", "infrastructure", "gateway-api", "values", "public", "enabled")
   end
+
+  def test_expands_gateway_tls_scenario_with_dns01_configuration
+    config = {
+      "provider" => "digitalocean",
+      "scenario_generation" => {
+        "base" => { "blueprint" => "kubernetes-foundation", "variant" => "kubernetes" },
+        "lifecycle" => {
+          "id" => "lifecycle",
+          "base_modules" => [],
+          "required_modules" => [],
+          "steps" => [],
+          "gateway_scenarios" => [
+            {
+              "id" => "gateway-tls",
+              "enabled_profiles" => ["public"],
+              "hostnames" => { "public" => "gateway.example.test" },
+              "acme" => { "email" => "certs@example.test", "server" => "staging" }
+            }
+          ]
+        }
+      }
+    }
+
+    scenario = OPSd::PublicScenarioMatrix.expand(config).find { |entry| entry.fetch("id") == "gateway-tls" }
+
+    assert_equal({ "public" => "gateway.example.test" }, scenario.dig("expected_gateway_tls", "hostnames"))
+    assert_equal "staging", scenario.dig("manifest_overrides", "components", "infrastructure", "gateway-api", "values", "acme", "server")
+    assert_equal "gateway.example.test", scenario.dig("manifest_overrides", "components", "infrastructure", "gateway-api", "values", "public", "hostname")
+  end
 end
