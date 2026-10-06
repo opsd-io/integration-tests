@@ -132,4 +132,26 @@ class PublicScenarioMatrixTest < Minitest::Test
     assert_equal true, scenario.dig("manifest_overrides", "components", "infrastructure", "external-dns", "enabled")
     assert_equal ["render-only"], scenario.fetch("iac_tools")
   end
+
+  def test_expands_external_secrets_render_only_scenario
+    config = {
+      "provider" => "digitalocean",
+      "scenario_generation" => {
+        "base" => { "blueprint" => "kubernetes-foundation", "variant" => "kubernetes" },
+        "lifecycle" => {
+          "id" => "lifecycle",
+          "base_modules" => [],
+          "required_modules" => [],
+          "steps" => [],
+          "external_secrets_scenario" => { "id" => "external-secrets" }
+        }
+      }
+    }
+
+    scenario = OPSd::PublicScenarioMatrix.expand(config).find { |entry| entry.fetch("id") == "external-secrets" }
+
+    assert_equal true, scenario.dig("manifest_overrides", "components", "infrastructure", "external-secrets", "enabled")
+    assert_equal true, scenario.fetch("expected_external_secrets")
+    assert_equal ["render-only"], scenario.fetch("iac_tools")
+  end
 end

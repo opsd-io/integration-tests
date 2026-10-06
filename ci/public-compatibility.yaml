@@ -94,3 +94,7 @@ scenario_generation:
         policy: upsert-only
       execution_modes: [plan]
       iac_tools: [render-only]
+    external_secrets_scenario:
+      id: digitalocean-external-secrets
+      execution_modes: [plan]
+      iac_tools: [render-only]
