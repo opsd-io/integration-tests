@@ -39,11 +39,15 @@ manifest_path = run_root.join("environment.yaml")
 opsd = CLI_ROOT.join("bin/opsd").to_s
 
 child_env = {
+  "PATH" => ENV.fetch("PATH", ""),
   "OPSD_APP_ROOT" => CLI_ROOT.to_s,
   "OPSD_WORKSPACE_ROOT" => workspace_root.to_s,
   "OPSD_PROFILE" => "ci",
   "OPSD_MODULES_DIGITALOCEAN_REF" => modules_ref
 }
+if scenario["kubernetes_modules_ref"]
+  child_env["OPSD_MODULES_KUBERNETES_REF"] = ENV.fetch("OPSD_PUBLIC_KUBERNETES_MODULES_REF", scenario.fetch("kubernetes_modules_ref"))
+end
 
 def command_text(command)
   Shellwords.join(command)
@@ -134,6 +138,20 @@ def apply_manifest_overrides!(manifest_path, overrides)
 
   manifest = YAML.load_file(manifest_path)
   spec = manifest.fetch("spec")
+  if overrides["gitops_repository"]
+    repository = overrides.fetch("gitops_repository")
+    compute = spec.fetch("compute_groups").first
+    delivery = compute.fetch("delivery")
+    delivery["mode"] = "gitops"
+    delivery["source"] = {
+      "mode" => "github",
+      "github" => {
+        "repository_url" => repository.fetch("repository_url"),
+        "revision" => repository.fetch("revision"),
+        "environment_path" => repository.fetch("environment_path")
+      }
+    }
+  end
   overrides.fetch("kubernetes_config", {}).each do |key, value|
     spec.fetch("compute_groups").first.fetch("config")[key] = value
   end
@@ -266,6 +284,22 @@ def assert_external_secrets!(rendered, expected:)
   abort "Rendered operator manifest unexpectedly contains bootstrap credentials" if File.read(application_path).match?(/accessToken|DIGITALOCEAN_ACCESS_TOKEN/)
 end
 
+def assert_platform_validation!(rendered)
+  %w[external-dns argocd].each do |module_id|
+    chart_output = rendered.join("platform", "helm", "#{module_id}.yaml")
+    abort "Platform render did not include the #{module_id} Helm output" unless chart_output.file?
+    abort "Platform Helm output is empty for #{module_id}" if chart_output.read.strip.empty?
+  end
+
+  root_application = rendered.join("layers", "00-bootstrap", "argocd", "root-application.yaml")
+  abort "Platform render did not include the Argo CD root Application" unless root_application.file?
+
+  lock = YAML.load_file(rendered.join("opsd.lock.yaml"))
+  chart_pin = Array(lock["helm_charts"]).find { |chart| chart["module"] == "external-dns" }
+  abort "opsd.lock.yaml is missing the ExternalDNS chart digest" unless chart_pin && chart_pin["digest"].match?(/\Asha256:[0-9a-f]{64}\z/)
+  abort "opsd.lock.yaml is missing the pinned Kubernetes module commit" unless lock.dig("kubernetes_modules", "commit").to_s.match?(/\A[0-9a-f]{40}\z/)
+end
+
 def configure_local_backend!(rendered, state_path)
   rendered.join("backend.tf").write(<<~HCL)
     terraform {
@@ -298,6 +332,9 @@ run!(child_env, opsd_command(opsd, "config", "profile", "use", "ci"))
 run!(child_env, opsd_command(opsd, "init", "blueprint", scenario.fetch("blueprint"), manifest_path.to_s, "--variant", scenario.fetch("variant")))
 namespace_manifest!(manifest_path, iac_tool, ENV.fetch("OPSD_CLI_REF", "current"), modules_ref)
 apply_manifest_overrides!(manifest_path, scenario.fetch("manifest_overrides", {}))
+if scenario.fetch("platform_validation", false)
+  run!(child_env, opsd_command(opsd, "modules", "sync", manifest_path.to_s))
+end
 
 upgrade_metadata = scenario.dig("metadata", "version_upgrade") || {}
 version_resolution = nil
@@ -386,7 +423,13 @@ stages.each_with_index do |stage, index|
   rendered = run_root.join("rendered-#{index}")
   active_rendered = rendered if execution_mode == "apply"
   run!(child_env, opsd_command(opsd, "validate", "manifest", manifest_path.to_s))
-  run!(child_env, opsd_command(opsd, "render", "manifest", manifest_path.to_s, "--output", rendered.to_s))
+  if scenario.fetch("platform_validation", false)
+    run!(child_env, opsd_command(opsd, "validate", "manifest", manifest_path.to_s, "--platform"))
+    run!(child_env, opsd_command(opsd, "validate", "manifest", manifest_path.to_s, "--platform", "--offline"))
+  end
+  render_args = ["render", "manifest", manifest_path.to_s, "--output", rendered.to_s]
+  render_args << "--include-platform" if scenario.fetch("platform_validation", false)
+  run!(child_env, opsd_command(opsd, *render_args))
   remove_placeholder_credentials!(rendered) if execution_mode == "apply"
   assert_rendered_components!(
     manifest_path,
@@ -398,6 +441,7 @@ stages.each_with_index do |stage, index|
   assert_gateway_tls!(rendered, expected_tls: scenario.fetch("expected_gateway_tls", {}))
   assert_external_dns!(rendered, expected: scenario.fetch("expected_external_dns", {}))
   assert_external_secrets!(rendered, expected: scenario.fetch("expected_external_secrets", false))
+  assert_platform_validation!(rendered) if scenario.fetch("platform_validation", false)
   assert_removed_components!(rendered, removed_modules: stage.fetch("covers", [])) if operation&.first&.first == "remove"
   if iac_tool == "render-only"
     puts "Completed render-only scenario stage: #{stage.fetch('label')}"

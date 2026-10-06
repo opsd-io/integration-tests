@@ -129,6 +129,30 @@ module OPSd
         )
       end
 
+      platform_scenario = lifecycle["platform_validation_scenario"]
+      if platform_scenario
+        overrides = deep_merge(
+          lifecycle.fetch("manifest_overrides", {}),
+          platform_scenario.fetch("manifest_overrides", {})
+        )
+        generated_scenarios << scenario(
+          platform_scenario.fetch("id"),
+          base.merge(
+            "operations" => [],
+            "required_modules" => base_modules,
+            "base_modules" => base_modules,
+            "metadata" => {},
+            "manifest_overrides" => overrides,
+            "expected_gateway_profiles" => [],
+            "expected_external_dns" => overrides.dig("components", "infrastructure", "external-dns", "values") || {},
+            "platform_validation" => true,
+            "kubernetes_modules_ref" => platform_scenario.fetch("kubernetes_modules_ref"),
+            "execution_modes" => platform_scenario.fetch("execution_modes", ["plan"]),
+            "iac_tools" => platform_scenario.fetch("iac_tools", ["render-only"])
+          )
+        )
+      end
+
       generated_scenarios.map { |entry| entry.merge("provider" => provider) }
     end
 
@@ -152,6 +176,8 @@ module OPSd
         "expected_gateway_tls" => base.fetch("expected_gateway_tls", {}),
         "expected_external_dns" => base.fetch("expected_external_dns", {}),
         "expected_external_secrets" => base.fetch("expected_external_secrets", false),
+        "platform_validation" => base.fetch("platform_validation", false),
+        "kubernetes_modules_ref" => base["kubernetes_modules_ref"],
         "execution_modes" => base.fetch("execution_modes", ["plan", "apply"]),
         "iac_tools" => base["iac_tools"]
       }
