@@ -98,3 +98,22 @@ scenario_generation:
       id: digitalocean-external-secrets
       execution_modes: [plan]
       iac_tools: [render-only]
+    platform_validation_scenario:
+      id: digitalocean-platform-validation
+      kubernetes_modules_ref: d35be7b1d1e9cfb768eb542039d35b1e57c43239
+      execution_modes: [plan]
+      iac_tools: [render-only]
+      manifest_overrides:
+        gitops_repository:
+          repository_url: https://github.com/opsd-io/platform-fixture.git
+          revision: main
+          environment_path: environments/integration
+        components:
+          infrastructure:
+            external-dns:
+              enabled: true
+              values:
+                domain_filters: [example.test]
+                txt_owner_id: opsd-ci-platform
+                token_secret_name: digitalocean-dns
+                policy: upsert-only

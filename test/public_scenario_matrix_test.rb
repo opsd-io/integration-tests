@@ -154,4 +154,35 @@ class PublicScenarioMatrixTest < Minitest::Test
     assert_equal true, scenario.fetch("expected_external_secrets")
     assert_equal ["render-only"], scenario.fetch("iac_tools")
   end
+
+  def test_expands_combined_platform_validation_scenario
+    config = {
+      "provider" => "digitalocean",
+      "scenario_generation" => {
+        "base" => { "blueprint" => "kubernetes-foundation", "variant" => "kubernetes" },
+        "lifecycle" => {
+          "id" => "lifecycle",
+          "base_modules" => ["kubernetes"],
+          "required_modules" => ["kubernetes"],
+          "steps" => [],
+          "platform_validation_scenario" => {
+            "id" => "platform-validation",
+            "kubernetes_modules_ref" => "a" * 40,
+            "execution_modes" => ["plan"],
+            "iac_tools" => ["render-only"],
+            "manifest_overrides" => {
+              "components" => { "infrastructure" => { "external-dns" => { "enabled" => true } } }
+            }
+          }
+        }
+      }
+    }
+
+    scenario = OPSd::PublicScenarioMatrix.expand(config).find { |entry| entry.fetch("id") == "platform-validation" }
+
+    assert scenario.fetch("platform_validation")
+    assert_equal "a" * 40, scenario.fetch("kubernetes_modules_ref")
+    assert_equal ["render-only"], scenario.fetch("iac_tools")
+    assert_equal true, scenario.dig("manifest_overrides", "components", "infrastructure", "external-dns", "enabled")
+  end
 end

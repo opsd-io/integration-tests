@@ -47,7 +47,11 @@ entries = cli_refs.flat_map do |cli_ref|
           "cli_ref" => cli_ref,
           "modules_ref" => modules_ref,
           "scenario" => scenario.fetch("id"),
-          "iac_tool" => iac_tool
+          "iac_tool" => iac_tool,
+          "platform_validation" => scenario.fetch("platform_validation", false),
+          "kubernetes_modules_ref" => if scenario["kubernetes_modules_ref"]
+                                          immutable_ref("opsd-io/modules-kubernetes", scenario.fetch("kubernetes_modules_ref"))
+                                        end
         }
       end
     end
